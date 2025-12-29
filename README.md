@@ -17,6 +17,16 @@ without relying on proprietary AutoStore internals.
 
 ## Demo
 
-Start API:
-```bash
-python -m uvicorn app.main:app --app-dir src
+Open Swagger:
+- http://127.0.0.1:8000/docs
+
+Run:
+- POST `/decant/order`
+
+Request:
+```json
+{
+  "sku": "SKU-123",
+  "quantity": 5,
+  "bin_id": "BIN-A01"
+}
