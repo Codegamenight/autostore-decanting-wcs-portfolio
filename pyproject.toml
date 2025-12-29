@@ -1,0 +1,12 @@
+[project]
+name = "autostore-decanting-wcs-portfolio"
+version = "0.1.0"
+description = "Portfolio project: AutoStore-style decanting WCS with robot orchestration (simulation-first)."
+requires-python = ">=3.10"
+dependencies = [
+  "fastapi",
+  "uvicorn"
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
