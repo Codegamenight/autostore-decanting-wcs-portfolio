@@ -1,17 +1,11 @@
-from app.simulator.faults import maybe_raise_fault
 from dataclasses import dataclass, asdict
 from enum import Enum
-from typing import Dict, List
+from typing import Dict, List, Optional
 import time
 import uuid
-import random
 
-class DecantState(str, Enum):
-    CREATED = "CREATED"
-    TOTE_REQUESTED = "TOTE_REQUESTED"
-    TOTE_AT_PORT = "TOTE_AT_PORT"
-    ROBOT_DECANTING = "ROBOT_DECANTING"
-    COMPLETED = "COMPLETED"
+from app.simulator.faults import maybe_raise_fault
+
 
 class DecantState(str, Enum):
     CREATED = "CREATED"
@@ -28,6 +22,7 @@ class TraceEvent:
     state: str
     message: str
 
+
 @dataclass
 class DecantTask:
     task_id: str
@@ -35,57 +30,77 @@ class DecantTask:
     qty: int
     state: DecantState
     trace: List[TraceEvent]
-    attempt: int = 0
-    fault: str | None = None
+    attempt: int = 1
+    fault: Optional[str] = None
+    fault_code: Optional[str] = None
+    operator_message: Optional[str] = None
+    recommended_action: Optional[str] = None
+
 
 def create_decant_task(sku: str, qty: int) -> DecantTask:
-    task_id = str(uuid.uuid4())
-    task = DecantTask(
-        task_id=task_id,
+    return DecantTask(
+        task_id=str(uuid.uuid4()),
         sku=sku,
         qty=qty,
         state=DecantState.CREATED,
-        trace=[TraceEvent(ts=time.time(), state=DecantState.CREATED, message="Task created")],
+        trace=[
+            TraceEvent(
+                ts=time.time(),
+                state=DecantState.CREATED.value,
+                message="Task created",
+            )
+        ],
     )
-    return task
 
-def run_decant_task(task: DecantTask) -> DecantTask:
-    def add(state: DecantState, msg: str, sleep_s: float = 0.5):
+
+def run_decant_task(task: DecantTask, force_fault: Optional[str] = None) -> DecantTask:
+    def add(state: DecantState, message: str, delay: float = 0.3):
         task.state = state
-        task.trace.append(TraceEvent(ts=time.time(), state=state, message=msg))
-        time.sleep(sleep_s)
-
-       task.attempt += 1
-    task.trace.append(
-        TraceEvent(ts=time.time(), state=task.state.value, message=f"Attempt {task.attempt} started")
-    )
+        task.trace.append(
+            TraceEvent(ts=time.time(), state=state.value, message=message)
+        )
+        time.sleep(delay)
 
     try:
         add(DecantState.TOTE_REQUESTED, "Requested empty tote at decant port")
+        maybe_raise_fault(task.sku, task.attempt, force_fault)
+
         add(DecantState.TOTE_AT_PORT, "Empty tote arrived at port")
+        maybe_raise_fault(task.sku, task.attempt, force_fault)
 
         add(DecantState.ROBOT_DECANTING, "Robot decanting items into tote")
-
-        # Fault injection happens during the critical operation
-        maybe_raise_fault(task.sku, task.attempt)
+        maybe_raise_fault(task.sku, task.attempt, force_fault)
 
         add(DecantState.COMPLETED, "Decant completed; inventory updated")
-        return task
 
     except Exception as e:
-        task.fault = str(e)
+        msg = str(e)
         task.state = DecantState.FAILED
-        task.trace.append(
-            TraceEvent(ts=time.time(), state=task.state.value, message=f"FAILED: {task.fault}")
-        )
-        return task  
+        task.fault = msg
 
-    add(DecantState.TOTE_REQUESTED, "Requested empty tote at decant port")
-    add(DecantState.TOTE_AT_PORT, "Empty tote arrived at port")
-    add(DecantState.ROBOT_DECANTING, "Robot decanting items into tote")
-    add(DecantState.COMPLETED, "Decant completed; inventory updated")
+        if msg.startswith("NO_TOTE_AVAILABLE"):
+            task.fault_code = "NO_TOTE_AVAILABLE"
+            task.operator_message = "No empty tote available at decant port."
+            task.recommended_action = "Check inbound buffer/replenishment and retry."
+        elif msg.startswith("ROBOT_PICK_FAILED"):
+            task.fault_code = "ROBOT_PICK_FAILED"
+            task.operator_message = "Robot failed during pick/decant operation."
+            task.recommended_action = "Check robot status, clear fault, then retry."
+        else:
+            task.fault_code = "UNKNOWN"
+            task.operator_message = "Unhandled fault during decant workflow."
+            task.recommended_action = "Review trace and escalate to automation support."
+
+        task.trace.append(
+            TraceEvent(
+                ts=time.time(),
+                state=task.state.value,
+                message=f"FAILED: {task.fault_code}",
+            )
+        )
 
     return task
+
 
 def task_to_dict(task: DecantTask) -> Dict:
     return {
@@ -95,5 +110,8 @@ def task_to_dict(task: DecantTask) -> Dict:
         "state": task.state.value,
         "attempt": task.attempt,
         "fault": task.fault,
+        "fault_code": task.fault_code,
+        "operator_message": task.operator_message,
+        "recommended_action": task.recommended_action,
         "trace": [asdict(e) for e in task.trace],
     }
