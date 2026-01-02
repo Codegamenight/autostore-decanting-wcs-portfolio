@@ -30,3 +30,10 @@ Request:
   "quantity": 5,
   "bin_id": "BIN-A01"
 }
+## Project Milestones
+
+- Initial AutoStore-style decanting WCS with deterministic state machine
+- API-first design with Swagger-based demo
+- Fault injection for tote availability and robot pick failures
+- Operator-centric fault handling with guidance and recovery actions
+- Lightweight runtime metrics for observability
