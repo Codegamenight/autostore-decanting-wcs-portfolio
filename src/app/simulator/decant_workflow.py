@@ -1,8 +1,10 @@
+from app.simulator.faults import maybe_raise_fault
 from dataclasses import dataclass, asdict
 from enum import Enum
 from typing import Dict, List
 import time
 import uuid
+import random
 
 class DecantState(str, Enum):
     CREATED = "CREATED"
@@ -10,6 +12,15 @@ class DecantState(str, Enum):
     TOTE_AT_PORT = "TOTE_AT_PORT"
     ROBOT_DECANTING = "ROBOT_DECANTING"
     COMPLETED = "COMPLETED"
+
+class DecantState(str, Enum):
+    CREATED = "CREATED"
+    TOTE_REQUESTED = "TOTE_REQUESTED"
+    TOTE_AT_PORT = "TOTE_AT_PORT"
+    ROBOT_DECANTING = "ROBOT_DECANTING"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+
 
 @dataclass
 class TraceEvent:
@@ -24,6 +35,8 @@ class DecantTask:
     qty: int
     state: DecantState
     trace: List[TraceEvent]
+    attempt: int = 0
+    fault: str | None = None
 
 def create_decant_task(sku: str, qty: int) -> DecantTask:
     task_id = str(uuid.uuid4())
@@ -42,6 +55,31 @@ def run_decant_task(task: DecantTask) -> DecantTask:
         task.trace.append(TraceEvent(ts=time.time(), state=state, message=msg))
         time.sleep(sleep_s)
 
+       task.attempt += 1
+    task.trace.append(
+        TraceEvent(ts=time.time(), state=task.state.value, message=f"Attempt {task.attempt} started")
+    )
+
+    try:
+        add(DecantState.TOTE_REQUESTED, "Requested empty tote at decant port")
+        add(DecantState.TOTE_AT_PORT, "Empty tote arrived at port")
+
+        add(DecantState.ROBOT_DECANTING, "Robot decanting items into tote")
+
+        # Fault injection happens during the critical operation
+        maybe_raise_fault(task.sku, task.attempt)
+
+        add(DecantState.COMPLETED, "Decant completed; inventory updated")
+        return task
+
+    except Exception as e:
+        task.fault = str(e)
+        task.state = DecantState.FAILED
+        task.trace.append(
+            TraceEvent(ts=time.time(), state=task.state.value, message=f"FAILED: {task.fault}")
+        )
+        return task  
+
     add(DecantState.TOTE_REQUESTED, "Requested empty tote at decant port")
     add(DecantState.TOTE_AT_PORT, "Empty tote arrived at port")
     add(DecantState.ROBOT_DECANTING, "Robot decanting items into tote")
@@ -55,5 +93,7 @@ def task_to_dict(task: DecantTask) -> Dict:
         "sku": task.sku,
         "qty": task.qty,
         "state": task.state.value,
+        "attempt": task.attempt,
+        "fault": task.fault,
         "trace": [asdict(e) for e in task.trace],
     }
